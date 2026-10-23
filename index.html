@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>도시별 실시간 날씨 지도 (Leaflet.js)</title>
+    <!-- Leaflet CSS CDN -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Malgun Gothic', sans-serif;
+            background-color: #f8fafc;
+            color: #0f172a;
+        }
+        header {
+            background-color: #1e293b;
+            color: #ffffff;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        header h1 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+        @media (min-width: 640px) {
+            header h1 {
+                font-size: 1.5rem;
+            }
+        }
+        .notice {
+            background-color: #e0f2fe;
+            color: #0369a1;
+            padding: 0.625rem 1rem;
+            text-align: center;
+            font-size: 0.875rem;
+            border-bottom: 1px solid #bae6fd;
+        }
+        #map {
+            width: 100%;
+            height: calc(100vh - 110px);
+            z-index: 1;
+        }
+        
+        /* 마커 호버 흔들림(Shake) 애니메이션 */
+        @keyframes marker-shake {
+            0% { transform: scale(1.15) translateY(-6px) rotate(0deg); }
+            20% { transform: scale(1.15) translateY(-6px) rotate(-8deg); }
+            40% { transform: scale(1.15) translateY(-6px) rotate(8deg); }
+            60% { transform: scale(1.15) translateY(-6px) rotate(-6deg); }
+            80% { transform: scale(1.15) translateY(-6px) rotate(6deg); }
+            100% { transform: scale(1.15) translateY(-6px) rotate(0deg); }
+        }
+
+        .custom-pin {
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.2s ease;
+            outline: none;
+        }
+        .custom-pin:hover, .custom-pin:focus {
+            animation: marker-shake 0.5s ease-in-out forwards;
+            filter: drop-shadow(0px 8px 12px rgba(0,0,0,0.35));
+            z-index: 1000 !important;
+        }
+
+        /* 팝업 UI 스타일 및 모바일 대응 */
+        .weather-popup {
+            font-size: 0.875rem;
+            line-height: 1.4;
+            padding: 2px;
+        }
+        .popup-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        /* 모바일 모드 전용 날씨 컴팩트 레이아웃 */
+        @media (max-width: 639px) {
+            .weather-popup-mobile {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-width: 100px;
+            }
+            .weather-popup-mobile .popup-title {
+                font-size: 0.95rem;
+                margin-bottom: 2px;
+            }
+            .weather-popup-mobile img {
+                width: 44px;
+                height: 44px;
+                margin: -4px 0;
+            }
+            .weather-popup-mobile .temp-badge {
+                font-size: 1.25rem;
+                font-weight: 800;
+                color: #0f172a;
+            }
+            .weather-popup-mobile .sub-info {
+                font-size: 0.75rem;
+                color: #64748b;
+                margin-top: 2px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header role="banner">
+        <h1>전 세계 주요 도시 실시간 날씨 지도</h1>
+    </header>
+    
+    <main role="main">
+        <section class="notice" aria-label="안내 사항">
+            <p style="margin:0;">※ 지도의 도시 마커를 클릭/선택하면 실시간 날씨 정보를 확인할 수 있습니다.</p>
+        </section>
+        
+        <div id="map" aria-label="실시간 날씨 대화형 지도" role="region" tabindex="0"></div>
+    </main>
+
+    <!-- Leaflet JS CDN -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        // OpenWeatherMap API Key 설정
+        const OPENWEATHER_API_KEY = 'f738d53ea69e7fdd825364d81d17af21';
+
+        // 지도 초기화 (세계 지도 전체 보기)
+        const map = L.map('map', {
+            keyboard: true, // 접근성을 위한 키보드 조작 활성화
+            zoomControl: true
+        }).setView([25.0, 15.0], 2);
+
+        // OpenStreetMap 타일 레이어 추가
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // 도시 목록 데이터
+        const cities = [
+            // 대한민국
+            { name: '서울', lat: 37.5665, lon: 126.9780, color: '#ef4444' },
+            { name: '부산', lat: 35.1796, lon: 129.0756, color: '#2563eb' },
+            { name: '장흥 (장흥안양중)', lat: 34.6530, lon: 126.9738, color: '#10b981' },
+            { name: '제주', lat: 33.4996, lon: 126.5312, color: '#f59e0b' },
+            
+            // 아시아
+            { name: '도쿄', lat: 35.6762, lon: 139.6503, color: '#f43f5e' },
+            { name: '베이징', lat: 39.9042, lon: 116.4074, color: '#ec4899' },
+            { name: '방콕', lat: 13.7563, lon: 100.5018, color: '#d97706' },
+            { name: '싱가포르', lat: 1.3521, lon: 103.8198, color: '#3b82f6' },
+            
+            // 유럽
+            { name: '런던', lat: 51.5074, lon: -0.1278, color: '#1d4ed8' },
+            { name: '파리', lat: 48.8566, lon: 2.3522, color: '#4f46e5' },
+            { name: '로마', lat: 41.9028, lon: 12.4964, color: '#0284c7' },
+            { name: '베를린', lat: 52.5200, lon: 13.4050, color: '#059669' },
+            
+            // 아메리카
+            { name: '뉴욕', lat: 40.7128, lon: -74.0060, color: '#8b5cf6' },
+            { name: '로스앤젤레스', lat: 34.0522, lon: -118.2437, color: '#a855f7' },
+            { name: '토론토', lat: 43.6532, lon: -79.3832, color: '#0d9488' },
+            { name: '상파울루', lat: -23.5505, lon: -46.6333, color: '#16a34a' },
+            
+            // 오세아니아 / 기타
+            { name: '시드니', lat: -33.8688, lon: 151.2093, color: '#ea580c' },
+            { name: '카이로', lat: 30.0444, lon: 31.2357, color: '#c2410c' }
+        ];
+
+        // SVG 커스텀 마커 생성 함수
+        function createCustomIcon(color, label) {
+            const initialChar = label.split(' ')[0].charAt(0);
+            const svgIcon = `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" width="34" height="46" aria-hidden="true" style="filter: drop-shadow(0px 3px 6px rgba(0,0,0,0.3)); cursor: pointer;">
+                    <path fill="${color}" stroke="#ffffff" stroke-width="16" d="M172.268 501.67C26.97 291.031 0 269.413 0 192 0 85.961 85.961 0 192 0s192 85.961 192 192c0 77.413-26.97 99.031-172.268 309.67a24 24 0 0 1-35.464 0z"/>
+                    <circle cx="192" cy="192" r="75" fill="#ffffff"/>
+                    <text x="192" y="205" fill="${color}" font-size="80" font-weight="bold" text-anchor="middle">${initialChar}</text>
+                </svg>
+            `;
+
+            return L.divIcon({
+                className: 'custom-pin',
+                html: svgIcon,
+                iconSize: [34, 46],
+                iconAnchor: [17, 46],
+                popupAnchor: [0, -42]
+            });
+        }
+
+        // Open-Meteo 날씨 코드를 한글 설명으로 변환
+        function parseWmoCode(code) {
+            const codes = {
+                0: '맑음', 1: '대체로 맑음', 2: '구름 조금', 3: '흐림',
+                45: '안개', 51: '이슬비', 61: '약한 비', 63: '비',
+                71: '약한 눈', 73: '눈', 95: '뇌우'
+            };
+            return codes[code] || '구름 약간';
+        }
+
+        // 반응형 날씨 HTML 생성기 (모바일: 아이콘 + 숫자 중심)
+        function buildWeatherHTML(cityName, color, weatherData) {
+            const isMobile = window.innerWidth < 640;
+
+            if (isMobile) {
+                // 모바일 크기: 아이콘과 숫자 중심으로 간결화
+                return `
+                    <div class="weather-popup-mobile" role="dialog" aria-label="${cityName} 날씨">
+                        <div class="popup-title" style="color: ${color};">${cityName}</div>
+                        <img src="${weatherData.iconUrl}" alt="${weatherData.desc}">
+                        <div class="temp-badge">${weatherData.temp}°C</div>
+                        <div class="sub-info">💧 ${weatherData.humidity}% | 💨 ${weatherData.windSpeed}m/s</div>
+                    </div>
+                `;
+            } else {
+                // 데스크톱 크기: 상세 텍스트 정보 포함
+                return `
+                    <div class="weather-popup" style="text-align: center;" role="dialog" aria-label="${cityName} 날씨">
+                        <div class="popup-title" style="color: ${color};">${cityName}</div>
+                        <img src="${weatherData.iconUrl}" alt="${weatherData.desc}" style="width: 50px; height: 50px; margin: -4px 0;"><br>
+                        <span style="font-size: 0.9rem; font-weight: 600;">${weatherData.desc}</span><br>
+                        온도: <b>${weatherData.temp}°C</b> (체감 ${weatherData.feelsLike}°C)<br>
+                        습도: ${weatherData.humidity}% | 풍속: ${weatherData.windSpeed} m/s
+                    </div>
+                `;
+            }
+        }
+
+        // 도시 마커 추가 및 이벤트 연결
+        cities.forEach(city => {
+            const icon = createCustomIcon(city.color, city.name);
+            const marker = L.marker([city.lat, city.lon], {
+                icon: icon,
+                title: `${city.name} 날씨 확인`, // 접근성 스크린리더 타이틀
+                alt: `${city.name} 위치 마커`
+            }).addTo(map);
+
+            marker.bindPopup(`<b>${city.name}</b><br>마커를 클릭하면 실시간 날씨를 불러옵니다.`);
+
+            marker.on('click', async () => {
+                marker.setPopupContent(`<b>${city.name}</b><br>날씨 정보를 불러오는 중...`);
+
+                try {
+                    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${city.lat}&lon=${city.lon}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=kr`;
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error('OpenWeatherMap API 오류');
+
+                    const data = await response.json();
+                    const weatherInfo = {
+                        temp: Math.round(data.main.temp),
+                        feelsLike: Math.round(data.main.feels_like),
+                        desc: data.weather[0].description,
+                        humidity: data.main.humidity,
+                        windSpeed: Math.round(data.wind.speed * 10) / 10,
+                        iconUrl: `https://openweathermap.org/img/wn/${data.weather[0].icon}@2x.png`
+                    };
+
+                    marker.setPopupContent(buildWeatherHTML(city.name, city.color, weatherInfo));
+
+                } catch (error) {
+                    // Fallback to Open-Meteo
+                    try {
+                        const fallbackUrl = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&timezone=auto`;
+                        const res = await fetch(fallbackUrl);
+                        const fallbackData = await res.json();
+                        const current = fallbackData.current;
+
+                        const weatherInfo = {
+                            temp: Math.round(current.temperature_2m),
+                            feelsLike: Math.round(current.apparent_temperature),
+                            desc: parseWmoCode(current.weather_code),
+                            humidity: current.relative_humidity_2m,
+                            windSpeed: Math.round(current.wind_speed_10m * 10) / 10,
+                            iconUrl: `https://openweathermap.org/img/wn/02d@2x.png`
+                        };
+
+                        marker.setPopupContent(buildWeatherHTML(city.name, city.color, weatherInfo));
+                    } catch (fallbackError) {
+                        marker.setPopupContent(`
+                            <div style="text-align: center; color: #ef4444;">
+                                <b>${city.name}</b><br>날씨 데이터를 불러오지 못했습니다.
+                            </div>
+                        `);
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
